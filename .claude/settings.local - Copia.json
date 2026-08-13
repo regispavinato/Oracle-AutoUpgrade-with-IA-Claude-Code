@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/chris/.ssh//**)",
+      "Read(//c/Users/chris/.ssh/**)",
+      "Bash(ssh *)",
+      "PowerShell(ssh -i \"$env:USERPROFILE\\\\.ssh\\\\oracle_imersao\" -o StrictHostKeyChecking=no oracle@192.168.0.125 \"echo ok\" 2>&1)",
+      "PowerShell(Test-NetConnection *)",
+      "PowerShell(ssh -v -i \"$env:USERPROFILE\\\\.ssh\\\\oracle_imersao\" -o StrictHostKeyChecking=no oracle@192.168.0.125 \"echo ok\" 2>&1 | Select-String -Pattern \"debug1:|WARNING|error|Auth|key|Permission|Closed|closed\" | Select-Object -First 30)",
+      "Bash(sshpass *)",
+      "Bash(where plink *)",
+      "Bash(python3 -c \"import paramiko; print\\('paramiko ok'\\)\")",
+      "Bash(python3 *)",
+      "Skill(loop)",
+      "Bash(grep -n 'cid\\\\|comp_id\\\\|CATPROC\\\\|cdb_registry\\\\|v\\\\$pdbs' D:/Imersao_Autoupgrade/.claude/skills/08-verificacao-final.md)"
+    ]
+  }
+}

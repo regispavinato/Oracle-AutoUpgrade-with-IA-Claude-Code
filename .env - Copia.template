@@ -1,0 +1,73 @@
+# =============================================================
+# Oracle Imersão AutoUpgrade — Variáveis de Ambiente
+# =============================================================
+# INSTRUÇÕES:
+#   1. Copie este arquivo para .env  (cp .env.template .env)
+#   2. Preencha todos os campos CHANGE_ME
+#   3. Verifique DISK_DEVICE e GOLD_IMAGE_* antes de rodar
+#   4. NUNCA commite o arquivo .env
+# =============================================================
+
+# --- Conexão com a VM ---
+VM_IP=CHANGE_ME
+VM_HOSTNAME=CHANGE_ME
+SSH_KEY=~/.ssh/oracle_imersao       # Gerado pelo skill oracle-imersao
+
+# --- VM VirtualBox (skill 00-criar-vm) ---
+VM_NETMASK=255.255.255.0
+VM_GATEWAY=CHANGE_ME                 # Ex: 192.168.1.1
+VM_DNS1=8.8.8.8
+VM_DNS2=1.1.1.1
+VM_BRIDGE_ADAPTER=CHANGE_ME          # Nome exato do adaptador de rede do host (ver: VBoxManage list bridgedifs)
+VM_TIMEZONE=America/Sao_Paulo
+VM_RAM_MB=6144
+VM_CPUS=6
+VM_DISK1_GB=100
+VM_DISK2_GB=40
+VMS_BASE_DIR=D:\VMs
+ISO_PATH_OL8=CHANGE_ME               # Caminho completo do .iso do Oracle Linux 8.10 (ex: D:\ISOs\OracleLinux-R8-U10-x86_64-dvd.iso)
+
+# --- Credenciais do SO (nunca em código) ---
+ROOT_PWD=CHANGE_ME
+ORACLE_OS_PWD=CHANGE_ME
+
+# --- Oracle: usuário e grupos ---
+ORACLE_USER=oracle
+ORACLE_GROUP=oinstall
+DBA_GROUP=dba
+
+# --- Estrutura de diretórios Oracle ---
+ORACLE_BASE=/u01/app/oracle
+ORACLE_HOME_19C=/u01/app/oracle/product/19.3.0/db_1
+ORACLE_HOME_19C_PATCHED=/u01/app/oracle/product/19.3.0/dbhome_1
+ORACLE_HOME_23AI=/u01/app/oracle/product/23.0.0/dbhome_1
+ORACLE_INVENTORY=/u01/app/oraInventory
+
+# --- Banco de dados ---
+ORACLE_SID=ORCL
+ORACLE_PWD=CHANGE_ME                # Senha SYS/SYSTEM/PDBADMIN
+DB_MEMORY_MB=2048
+DB_REDO_SIZE_MB=50
+DB_CHARSET=AL32UTF8
+
+# --- Armazenamento ---
+DISK_DEVICE=CHANGE_ME               # Verificar com: lsblk  (ex: /dev/sdb)
+VG_NAME=vg_u02
+LV_NAME=lv_u02
+MOUNT_POINT=/u02
+ORADATA_DIR=/u02/oradata
+FRA_DIR=/u02/fra
+
+# --- Instalação ---
+INSTALL_DIR=/install
+GOLD_IMAGE_19C=CHANGE_ME            # Ex: LINUX.X64_193000_db_home.zip
+GOLD_IMAGE_23AI=CHANGE_ME           # Ex: LINUX.X64_2326100_db_home.zip
+AUTOUPGRADE_JAR=/install/autoupgrade.jar
+
+# --- AutoUpgrade ---
+AUTOUPGRADE_LOG_DIR=/u01/app/oracle/cfgtoollogs/autoupgrade
+PATCH_DIR=/install/patches
+
+# --- Oracle 23ai ---
+ORACLE_23AI_VERSION=23.26.1
+ORACLE_23AI_PATCH_VERSION=23.26.2

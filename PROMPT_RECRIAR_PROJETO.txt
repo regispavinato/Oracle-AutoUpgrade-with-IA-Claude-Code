@@ -1,0 +1,579 @@
+================================================================
+PROMPT MESTRE — RECRIAR O PROJETO "Oracle Imersão AutoUpgrade"
+================================================================
+
+Este arquivo é um prompt completo e autocontido. Cole-o inteiro em uma
+sessão nova do Claude Code, aberta em uma pasta vazia (ex.: um novo
+diretório D:\Imersao_Autoupgrade), para que o projeto seja recriado
+EXATAMENTE como está hoje: mesma estrutura de pastas, mesmo CLAUDE.md,
+mesmo README.md, mesmo .gitignore, mesmo .env.template e as mesmas 10
+skills (.claude/skills/*.md) com todo o conteúdo técnico, incluindo os
+workarounds e "lições aprendidas" já validados em execução real.
+
+INSTRUÇÃO PARA O AGENTE QUE FOR EXECUTAR ESTE PROMPT:
+------------------------------------------------------
+Crie cada arquivo abaixo com o conteúdo EXATO indicado entre os
+marcadores "-----BEGIN FILE: <caminho>-----" e "-----END FILE-----".
+Não resuma, não parafraseie, não "melhore" o conteúdo — copie literal-
+mente. A única exceção é o arquivo `.env`, que NUNCA deve ser criado
+com valores reais: apenas `.env.template` deve ser criado (com campos
+CHANGE_ME), e o usuário final é quem copia para `.env` e preenche.
+
+Ordem de criação recomendada:
+1. Estrutura de pastas
+2. .gitignore
+3. .env.template
+4. CLAUDE.md
+5. README.md
+6. .claude/skills/oracle-imersao.md (skill principal / roteador)
+7. .claude/skills/01-prepare-ambiente.md
+8. .claude/skills/02-download-patch.md
+9. .claude/skills/03-criar-oracle-home.md
+10. .claude/skills/04-aplicar-patch.md
+11. .claude/skills/05-converter-multitenant.md
+12. .claude/skills/06-migrar-23ai.md
+13. .claude/skills/07-patch-23262.md
+14. .claude/skills/08-verificacao-final.md
+15. .claude/skills/08-patch-oracle-restart.md
+
+NOTA IMPORTANTE SOBRE INCONSISTÊNCIA CONHECIDA (preservar, não corrigir):
+O README.md e a tabela do CLAUDE.md tratam a Atividade 8 como
+"08-verificacao-final" (verificação final + post LinkedIn), e é essa a
+skill que o roteador `oracle-imersao.md` invoca quando o argumento é
+`8`. Porém existe também um arquivo `08-patch-oracle-restart.md`
+(patch de Oracle Restart/Grid Infrastructure) que NÃO é referenciado
+pelo roteador — é um artefato remanescente de uma versão anterior da
+agenda em que a Atividade 8 era outra coisa. Recrie AMBOS os arquivos
+tal como estão, sem tentar unificá-los ou corrigir a referência — isso
+preserva o estado real do projeto.
+
+================================================================
+1. ESTRUTURA DE DIRETÓRIOS
+================================================================
+Crie a seguinte árvore a partir da raiz do projeto:
+
+Imersao_Autoupgrade/
+├── .claude/
+│   └── skills/
+│       ├── oracle-imersao.md
+│       ├── 01-prepare-ambiente.md
+│       ├── 02-download-patch.md
+│       ├── 03-criar-oracle-home.md
+│       ├── 04-aplicar-patch.md
+│       ├── 05-converter-multitenant.md
+│       ├── 06-migrar-23ai.md
+│       ├── 07-patch-23262.md
+│       ├── 08-verificacao-final.md
+│       └── 08-patch-oracle-restart.md
+├── .env.template
+├── .gitignore
+├── CLAUDE.md
+└── README.md
+
+(O arquivo `.env` real, com valores preenchidos, é criado manualmente
+pelo usuário a partir do `.env.template` — nunca pela IA.)
+
+================================================================
+2. ARQUIVO: .gitignore
+================================================================
+-----BEGIN FILE: .gitignore-----
+# Arquivos com dados sensíveis — NUNCA commitar
+.env
+*.env
+.env.local
+.env.*.local
+
+# Logs e artefatos temporários
+*.log
+logs/
+tmp/
+
+# Artefatos de autoupgrade
+cfgtoollogs/
+autoupgrade/
+
+# SO
+.DS_Store
+Thumbs.db
+-----END FILE-----
+
+================================================================
+3. ARQUIVO: .env.template
+================================================================
+-----BEGIN FILE: .env.template-----
+# =============================================================
+# Oracle Imersão AutoUpgrade — Variáveis de Ambiente
+# =============================================================
+# INSTRUÇÕES:
+#   1. Copie este arquivo para .env  (cp .env.template .env)
+#   2. Preencha todos os campos CHANGE_ME
+#   3. Verifique DISK_DEVICE e GOLD_IMAGE_* antes de rodar
+#   4. NUNCA commite o arquivo .env
+# =============================================================
+
+# --- Conexão com a VM ---
+VM_IP=CHANGE_ME
+VM_HOSTNAME=CHANGE_ME
+SSH_KEY=~/.ssh/oracle_imersao       # Gerado pelo skill oracle-imersao
+
+# --- Credenciais do SO (nunca em código) ---
+ROOT_PWD=CHANGE_ME
+ORACLE_OS_PWD=CHANGE_ME
+
+# --- Oracle: usuário e grupos ---
+ORACLE_USER=oracle
+ORACLE_GROUP=oinstall
+DBA_GROUP=dba
+
+# --- Estrutura de diretórios Oracle ---
+ORACLE_BASE=/u01/app/oracle
+ORACLE_HOME_19C=/u01/app/oracle/product/19.3.0/db_1
+ORACLE_HOME_19C_PATCHED=/u01/app/oracle/product/19.3.0/dbhome_1
+ORACLE_HOME_23AI=/u01/app/oracle/product/23.0.0/dbhome_1
+ORACLE_INVENTORY=/u01/app/oraInventory
+
+# --- Banco de dados ---
+ORACLE_SID=ORCL
+ORACLE_PWD=CHANGE_ME                # Senha SYS/SYSTEM/PDBADMIN
+DB_MEMORY_MB=2048
+DB_REDO_SIZE_MB=50
+DB_CHARSET=AL32UTF8
+
+# --- Armazenamento ---
+DISK_DEVICE=CHANGE_ME               # Verificar com: lsblk  (ex: /dev/sdb)
+VG_NAME=vg_u02
+LV_NAME=lv_u02
+MOUNT_POINT=/u02
+ORADATA_DIR=/u02/oradata
+FRA_DIR=/u02/fra
+
+# --- Instalação ---
+INSTALL_DIR=/install
+GOLD_IMAGE_19C=CHANGE_ME            # Ex: LINUX.X64_193000_db_home.zip
+GOLD_IMAGE_23AI=CHANGE_ME           # Ex: LINUX.X64_2326100_db_home.zip
+AUTOUPGRADE_JAR=/install/autoupgrade.jar
+
+# --- AutoUpgrade ---
+AUTOUPGRADE_LOG_DIR=/u01/app/oracle/cfgtoollogs/autoupgrade
+PATCH_DIR=/install/patches
+
+# --- Patches disponíveis em /install ---
+OPATCH_ZIP=p6880880_190000_Linux-x86-64.zip          # OPatch atualizado para 19c
+PATCH_19C_ZIP=p39034528_190000_Linux-x86-64.zip      # Release Update 19c
+
+# --- Oracle 23ai ---
+ORACLE_23AI_VERSION=23.26.1
+ORACLE_23AI_PATCH_VERSION=23.26.2
+-----END FILE-----
+
+================================================================
+4. ARQUIVO: CLAUDE.md
+================================================================
+-----BEGIN FILE: CLAUDE.md-----
+# Oracle Imersão AutoUpgrade — Contexto do Projeto
+
+## Objetivo
+Imersão de dois dias sobre Oracle AutoUpgrade cobrindo instalação, patching, conversão para Multitenant e migração para 23ai.
+
+## Estrutura de Skills
+As skills estão em `.claude/skills/` e seguem numeração das atividades da imersão:
+
+| Skill | Atividade |
+|---|---|
+| `oracle-imersao` | **Principal** — roteador, verifica pré-requisitos e invoca skills específicas |
+| `01-prepare-ambiente` | OS prep + LVM + Install Oracle 19c + DBCA + Listener + startup |
+| `02-download-patch` | Download do último patch via autoupgrade |
+| `03-criar-oracle-home` | Criar novo Oracle Home com autoupgrade |
+| `04-aplicar-patch` | Aplicar patch com autoupgrade |
+| `05-converter-multitenant` | Converter non-CDB para Multitenant com autoupgrade |
+| `06-migrar-23ai` | Migrar 19c → 23.26.1 com autoupgrade |
+| `07-patch-23262` | Aplicar patch 23.26.1 → 23.26.2 com autoupgrade |
+| `08-verificacao-final` | Verificação final do ambiente + resumo LinkedIn |
+
+## Responsabilidades da IA neste projeto
+
+### Arquivos de configuração do AutoUpgrade (.cfg)
+- **Claude cria TODOS os arquivos `.cfg`** do AutoUpgrade — o usuário não os fornece.
+- Cada skill de patching/upgrade/conversão gera seu próprio `.cfg` com a sintaxe correta antes de executar.
+- Todos os `.cfg` são salvos em `${INSTALL_DIR}` (valor de `INSTALL_DIR` no `.env`).
+- Antes de criar um `.cfg`, exibir o conteúdo completo para o usuário verificar.
+
+### autoupgrade.jar
+- O `autoupgrade.jar` inicial é copiado de `${ORACLE_HOME_19C}/rdbms/admin/autoupgrade.jar` para `${INSTALL_DIR}/` na **Fase 8 da Atividade 1**.
+- A Atividade 2 executa `java -jar autoupgrade.jar -download` para atualizar para a versão mais recente.
+- O usuário nunca precisa baixar ou copiar o `autoupgrade.jar` manualmente.
+
+### Java (OpenJDK)
+- O OpenJDK 17 é instalado pela **Fase 8 da Atividade 1** via `dnf` para uso geral do SO.
+- **CRÍTICO**: O AutoUpgrade 26.x requer **Java 11** — o Java 17 do sistema causa erro `Unsupported Java Runtime Environment`.
+- Usar **sempre** o Java 11 embutido no Oracle Home: `${ORACLE_HOME}/jdk/bin/java`
+  - Skills 02, 04: `${ORACLE_HOME_19C}/jdk/bin/java`
+  - Skills 06, 07: `${ORACLE_HOME_23AI}/jdk/bin/java`
+- Cada skill define a variável `JAVA` apontando para o JDK correto do Oracle Home.
+- Nunca usar `java` (sistema) para executar autoupgrade.jar.
+
+### Arquivos de configuração gerados por skill
+
+| Skill | Arquivo .cfg criado em /install |
+|---|---|
+| `02-download-patch` | `autoupgrade_analyze.cfg` |
+| `04-aplicar-patch` | `autoupgrade_patch.cfg` |
+| `05-converter-multitenant` | `autoupgrade_convert.cfg` |
+| `06-migrar-23ai` | `autoupgrade_upgrade23ai.cfg` |
+| `07-patch-23262` | `autoupgrade_patch23262.cfg` |
+| `08-verificacao-final` | *(sem .cfg — apenas queries de verificação)* |
+
+---
+
+## Regras de Segurança (SEMPRE seguir)
+1. **Nunca** escrever senhas, IPs ou hostnames em skill files ou logs visíveis.
+2. **Sempre** carregar variáveis sensíveis do arquivo `.env` via Read tool antes de usar.
+3. **Nunca** exibir o conteúdo do `.env` na resposta — usar apenas os valores, mascarados em logs.
+4. Ao logar comandos no output, mascarar senhas com `***`.
+5. SSH via chave (`SSH_KEY` do `.env`); nunca passar senha via argumento `-pw` em linha visível.
+
+## Transição de ORACLE_SID ao longo das atividades
+
+| Skills | ORACLE_SID | Banco |
+|--------|-----------|-------|
+| 01 → 04 | `ORCL` (do `.env`) | non-CDB |
+| 05 | transição — começa com `ORCL`, termina com `CDBORCL` | non-CDB → CDB |
+| 06 → 08 | `CDBORCL` (**ignorar** `ORACLE_SID` do `.env`) | CDB com PDB ORCLPDB |
+
+> O arquivo `.env` mantém `ORACLE_SID=ORCL` por razão histórica. Nas skills 06-08, **nunca** usar `${ORACLE_SID}` do `.env` — usar sempre `CDBORCL` explicitamente.
+
+## Pré-requisitos para usar as skills
+- Arquivo `.env` preenchido (copiar de `.env.template`).
+- SSH key configurada entre esta máquina e a VM (o skill `oracle-imersao` oferece configurar isso).
+- Acesso root ou sudo na VM via SSH.
+- Gold Images copiadas para `/install` na VM antes de rodar as skills de instalação/upgrade.
+
+## Ambiente Alvo
+- **OS**: Oracle Linux 8.10
+- **CPU**: AMD Ryzen 7 | **RAM**: 6 GB | **vCPUs**: 6
+- **Disco OS**: 100 GB LVM (`/u01`)
+- **Disco Dados**: 40 GB LVM (`/u02`) — `DISK_DEVICE` no `.env`
+- **Rede**: VM VMware Workstation Pro
+-----END FILE-----
+
+================================================================
+5. ARQUIVO: README.md
+================================================================
+-----BEGIN FILE: README.md-----
+# Oracle Imersão AutoUpgrade — 2 Dias
+
+## Agenda
+
+### Dia 1 — 10h às 18h (intervalo 12h–13h30)
+| Horário | Atividade |
+|---|---|
+| 10h00 | **Atividade 1** — Preparação do ambiente Oracle Linux, LVM, instalação Oracle 19c non-CDB |
+| 12h00 | Almoço |
+| 13h30 | **Atividade 2** — Download do último patch com AutoUpgrade |
+| 14h30 | **Atividade 3** — Criação de novo Oracle Home com AutoUpgrade |
+| 16h00 | **Atividade 4** — Aplicação de patch com AutoUpgrade |
+
+### Dia 2 — 10h às 18h (intervalo 12h–13h30)
+| Horário | Atividade |
+|---|---|
+| 10h00 | **Atividade 5** — Converter banco 19c non-CDB para Multitenant com AutoUpgrade |
+| 12h00 | Almoço |
+| 13h30 | **Atividade 6** — Migrar banco 19c para Oracle 23ai (23.26.1) com AutoUpgrade |
+| 15h30 | **Atividade 7** — Aplicar patch 23.26.1 → 23.26.2 com AutoUpgrade |
+| 16h30 | **Atividade 8** — Patch em Oracle Restart 23ai |
+
+---
+
+## Ambiente
+
+| Componente | Detalhe |
+|---|---|
+| SO | Oracle Linux 8.10 |
+| CPU | AMD Ryzen 7 — 6 vCPUs |
+| RAM | 6 GB |
+| Disco OS | 100 GB LVM → `/u01` (Oracle Home + binários) |
+| Disco Dados | 40 GB LVM → `/u02` (datafiles, redo logs, FRA) |
+| Virtualização | VMware Workstation Pro |
+| Rede | Definido em `.env` |
+
+### Estrutura de diretórios Oracle
+```
+/u01/app/oracle/product/19.3.0/db_1       ← Oracle Home 19c inicial
+/u01/app/oracle/product/19.3.0/dbhome_1   ← Oracle Home 19c patchado
+/u01/app/oracle/product/23.0.0/dbhome_1   ← Oracle Home 23ai
+/u01/app/oraInventory
+/u02/oradata/                              ← Datafiles (OMF)
+/u02/fra/                                 ← Fast Recovery Area
+/install/                                 ← Gold Images e patches
+```
+
+---
+
+## Como usar as skills
+
+### 1. Configurar o ambiente
+```bash
+# Copiar template e editar
+cp .env.template .env
+# Editar .env com os valores reais (VM_IP, senhas, nomes de disco, etc.)
+```
+
+### 2. Configurar SSH (primeira vez)
+```
+/oracle-imersao setup-ssh
+```
+
+### 3. Executar atividade
+```
+/oracle-imersao 1        ← Atividade 1
+/oracle-imersao 2        ← Atividade 2
+...
+/oracle-imersao 8        ← Atividade 8
+```
+Ou invocar a skill diretamente:
+```
+/01-prepare-ambiente
+/02-download-patch
+...
+/08-patch-oracle-restart
+```
+
+---
+
+## Pré-requisitos antes de iniciar
+
+1. **`.env` preenchido** — copiar de `.env.template` e preencher TODOS os campos `CHANGE_ME`.
+2. **Gold Image 19c** copiada para `/install` na VM antes da Atividade 1.
+3. **Gold Image 23ai** copiada para `/install` na VM antes da Atividade 6.
+4. **Patches** copiados para `/install/patches/` antes das atividades de patch.
+5. **autoupgrade.jar** (versão mais recente) copiado para `/install/`.
+
+---
+
+## Segurança
+
+- **Nunca commitar o arquivo `.env`** — ele contém senhas e está no `.gitignore`.
+- Todas as skills mascaram senhas nos logs com `***`.
+- SSH via chave privada (sem senha em linha de comando).
+-----END FILE-----
+
+================================================================
+6. ARQUIVO: .claude/skills/oracle-imersao.md
+================================================================
+-----BEGIN FILE: .claude/skills/oracle-imersao.md-----
+---
+description: Skill principal da imersão Oracle AutoUpgrade — roteador de atividades e setup inicial de SSH
+---
+
+# Oracle Imersão — Skill Principal
+
+Você é o orquestrador da imersão Oracle AutoUpgrade de 2 dias. Sua função é:
+1. Verificar pré-requisitos
+2. Rotear para a skill da atividade solicitada
+3. Configurar SSH na primeira execução
+
+## Atividades disponíveis
+
+| Arg | Skill | Descrição |
+|---|---|---|
+| `setup-ssh` | — | Configura autenticação SSH por chave para a VM |
+| `1` | `01-prepare-ambiente` | OS prep + LVM + Oracle 19c + DBCA + Listener + startup |
+| `2` | `02-download-patch` | Download do último patch com AutoUpgrade |
+| `3` | `03-criar-oracle-home` | Criar novo Oracle Home com AutoUpgrade |
+| `4` | `04-aplicar-patch` | Aplicar patch com AutoUpgrade |
+| `5` | `05-converter-multitenant` | Converter non-CDB → Multitenant |
+| `6` | `06-migrar-23ai` | Migrar 19c → 23ai (23.26.1) |
+| `7` | `07-patch-23262` | Patch 23.26.1 → 23.26.2 |
+| `8` | `08-verificacao-final` | Verificação final do ambiente + resumo LinkedIn |
+
+---
+
+## Instruções de execução
+
+### Passo 1 — Carregar configuração
+
+Use o Read tool para ler o arquivo `.env` em `D:\Imersao_Autoupgrade\.env`.
+Extraia as seguintes variáveis e guarde-as em memória de trabalho:
+- `VM_IP`, `VM_HOSTNAME`, `SSH_KEY`
+- `ROOT_PWD`, `ORACLE_OS_PWD`, `ORACLE_PWD`
+- `ORACLE_USER`, `ORACLE_GROUP`, `DBA_GROUP`
+- `ORACLE_BASE`, `ORACLE_HOME_19C`, `ORACLE_HOME_19C_PATCHED`, `ORACLE_HOME_23AI`
+- `ORACLE_SID`, `DISK_DEVICE`, `VG_NAME`, `LV_NAME`
+- `INSTALL_DIR`, `GOLD_IMAGE_19C`, `GOLD_IMAGE_23AI`, `AUTOUPGRADE_JAR`
+- `ORACLE_INVENTORY`, `ORADATA_DIR`, `FRA_DIR`, `AUTOUPGRADE_LOG_DIR`
+
+Se o arquivo `.env` não existir, informe o usuário e instrua a copiar de `.env.template`.
+Se algum campo ainda estiver como `CHANGE_ME`, avise quais campos faltam antes de continuar.
+
+**Segurança**: nunca exibir no output os valores de `ROOT_PWD`, `ORACLE_OS_PWD` ou `ORACLE_PWD`. Substitua por `***` em qualquer log ou mensagem.
+
+### Passo 2 — Verificar arg recebido
+
+O argumento recebido (via `args`) pode ser:
+- `setup-ssh` → executar o bloco **Setup SSH** abaixo
+- `1` a `8` → invocar a skill correspondente usando o Skill tool
+
+### Passo 3 — Se arg for setup-ssh
+
+#### 3.1 — Gerar o par de chaves SSH (Claude executa via PowerShell tool)
+
+**IMPORTANTE — usar PowerShell, não Bash.** No Windows, o Git Bash pode gerar a chave com passphrase acidental quando `-N ""` é usado. O PowerShell com Windows OpenSSH não tem esse problema.
+
+```powershell
+$keyPath = "$env:USERPROFILE\.ssh\oracle_imersao"
+
+if (-not (Test-Path $keyPath)) {
+    New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.ssh" | Out-Null
+    ssh-keygen -t ed25519 -f $keyPath -N "" -C "oracle-imersao"
+    Write-Output "Par de chaves gerado:"
+    Write-Output "  Privada : $keyPath"
+    Write-Output "  Publica : $keyPath.pub"
+} else {
+    Write-Output "Par de chaves ja existe em $keyPath"
+}
+
+# Verificar que a chave NAO tem passphrase
+$check = ssh-keygen -y -P "" -f $keyPath 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Output "AVISO: chave tem passphrase. Removendo..."
+    ssh-keygen -p -P '""' -N "" -f $keyPath
+}
+
+Write-Output "=== Chave publica ==="
+Get-Content "$keyPath.pub"
+```
+
+#### 3.2 — Copiar a chave para a VM (via MobaXterm ou console da VM)
+
+O `ssh-copy-id` é problemático no Windows (paths Git Bash vs Windows, input interativo). **Método mais confiável:**
+
+Exibir as seguintes instruções para o usuário:
+
+---
+> **Ação necessária — copie a chave para a VM:**
+>
+> **Opção A — MobaXterm (recomendado):**
+> 1. Abra o MobaXterm e clique em "Start local terminal"
+> 2. Execute: `ssh root@IP_DA_VM` (usando a senha root)
+> 3. Dentro da VM, cole os comandos abaixo:
+>
+> ```bash
+> mkdir -p /root/.ssh && chmod 700 /root/.ssh
+> echo "CONTEUDO_DA_CHAVE_PUBLICA" >> /root/.ssh/authorized_keys
+> chmod 600 /root/.ssh/authorized_keys
+> echo "Chave adicionada OK"
+> ```
+>
+> **Opção B — Console VMware:**
+> Acesse a VM diretamente pelo VMware e execute os mesmos comandos acima.
+>
+> O conteúdo da chave pública (`CONTEUDO_DA_CHAVE_PUBLICA`) foi exibido no passo 3.1.
+---
+
+Aguardar confirmação do usuário de que a chave foi adicionada.
+
+#### 3.3 — Configurar ~/.ssh/config com keep-alive (Claude executa via Write tool)
+
+Criar ou atualizar `C:\Users\<usuario>\.ssh\config` para evitar quedas SSH em operações longas.
+**Não usar ControlMaster — não funciona no Windows com Git Bash.**
+
+```
+Host oracle-vm
+    HostName <VM_IP>
+    User oracle
+    IdentityFile ~/.ssh/oracle_imersao
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    StrictHostKeyChecking no
+    KexAlgorithms curve25519-sha256,ecdh-sha2-nistp256
+
+Host oracle-vm-root
+    HostName <VM_IP>
+    User root
+    IdentityFile ~/.ssh/oracle_imersao
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    StrictHostKeyChecking no
+    KexAlgorithms curve25519-sha256,ecdh-sha2-nistp256
+```
+
+#### 3.4 — Verificar conexão sem senha (Claude executa via Bash tool)
+
+```bash
+SSH_KEY_PATH=$(grep "^SSH_KEY=" /d/Imersao_Autoupgrade/.env | cut -d= -f2 | sed 's|~|'"$HOME"'|')
+VM_IP=$(grep "^VM_IP=" /d/Imersao_Autoupgrade/.env | cut -d= -f2)
+
+ssh -i "${SSH_KEY_PATH}" \
+    -o StrictHostKeyChecking=no \
+    -o LogLevel=ERROR \
+    -o BatchMode=yes \
+    -o ConnectTimeout=10 \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    "root@${VM_IP}" "echo 'SSH OK — conexao sem senha funcionando' && hostname && uptime"
+```
+
+- Se retornar `SSH OK`: confirmar ao usuário que o ambiente está pronto.
+- Se retornar `Permission denied` ou `Host key verification failed`: orientar a verificar se o `ssh-copy-id` foi executado corretamente ou se o IP/hostname no `.env` está correto.
+
+#### 3.5 — Configurar também acesso como oracle (opcional mas recomendado)
+
+```bash
+SSH_KEY_PATH=$(grep "^SSH_KEY=" /d/Imersao_Autoupgrade/.env | cut -d= -f2 | sed 's|~|'"$HOME"'|')
+VM_IP=$(grep "^VM_IP=" /d/Imersao_Autoupgrade/.env | cut -d= -f2)
+ORACLE_USER=$(grep "^ORACLE_USER=" /d/Imersao_Autoupgrade/.env | cut -d= -f2)
+
+# Copiar a mesma chave pública para o usuário oracle via root (sem senha adicional)
+ssh -i "${SSH_KEY_PATH}" -o StrictHostKeyChecking=no -o LogLevel=ERROR "root@${VM_IP}" "
+  mkdir -p /home/${ORACLE_USER}/.ssh
+  cat >> /home/${ORACLE_USER}/.ssh/authorized_keys << 'PUBKEY'
+$(cat ${SSH_KEY_PATH}.pub)
+PUBKEY
+  chown -R ${ORACLE_USER}:oinstall /home/${ORACLE_USER}/.ssh
+  chmod 700 /home/${ORACLE_USER}/.ssh
+  chmod 600 /home/${ORACLE_USER}/.ssh/authorized_keys
+  echo 'Chave copiada para usuario oracle'
+"
+```
+
+Verificar acesso como oracle:
+```bash
+SSH_KEY_PATH=$(grep "^SSH_KEY=" /d/Imersao_Autoupgrade/.env | cut -d= -f2 | sed 's|~|'"$HOME"'|')
+VM_IP=$(grep "^VM_IP=" /d/Imersao_Autoupgrade/.env | cut -d= -f2)
+ORACLE_USER=$(grep "^ORACLE_USER=" /d/Imersao_Autoupgrade/.env | cut -d= -f2)
+
+ssh -i "${SSH_KEY_PATH}" -o BatchMode=yes "${ORACLE_USER}@${VM_IP}" "echo 'Oracle SSH OK' && id"
+```
+
+### Passo 4 — Se arg for número de atividade (1-8)
+
+Invoque a skill correspondente usando o Skill tool com o nome da skill da tabela acima.
+Exemplo: se arg=1, invocar skill `01-prepare-ambiente`.
+
+Antes de invocar, confirme com o usuário:
+> "Vou executar a Atividade [N]: [descrição]. Confirmar?"
+
+---
+
+## Verificação de pré-requisitos (executar para qualquer atividade)
+
+Execute via Bash para confirmar conectividade:
+```bash
+VM_IP=$(grep "^VM_IP=" /d/Imersao_Autoupgrade/.env | cut -d= -f2)
+SSH_KEY=$(grep "^SSH_KEY=" /d/Imersao_Autoupgrade/.env | cut -d= -f2 | sed 's|~|'"$HOME"'|')
+
+ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no -o LogLevel=ERROR -o BatchMode=yes -o ConnectTimeout=10 \
+    "root@${VM_IP}" "hostname && uptime && df -h /u01 2>/dev/null || echo '/u01 nao montado'"
+```
+
+Se falhar, orientar o usuário a rodar `setup-ssh` primeiro.
+-----END FILE-----
+
+================================================================
+FIM DA PARTE 1 DE 3
+================================================================
+Este prompt continua no arquivo PROMPT_RECRIAR_PROJETO_PARTE2.txt
+com o conteúdo das skills 01 a 04, e no arquivo
+PROMPT_RECRIAR_PROJETO_PARTE3.txt com as skills 05 a 08 (ambas as
+versões da Atividade 8). Crie os três arquivos na ordem antes de
+considerar o projeto recriado.

@@ -1,0 +1,18 @@
+# Arquivos com dados sensíveis — NUNCA commitar
+.env
+*.env
+.env.local
+.env.*.local
+
+# Logs e artefatos temporários
+*.log
+logs/
+tmp/
+
+# Artefatos de autoupgrade
+cfgtoollogs/
+autoupgrade/
+
+# SO
+.DS_Store
+Thumbs.db
