@@ -19,3 +19,6 @@ Thumbs.db
 
 # Estado de sessão do Claude Code (lock files, runtime-local)
 .claude/scheduled_tasks.lock
+
+# Arquivos que nao foram criados por mim, mas que nao quero commitar
+entregaveis/*
