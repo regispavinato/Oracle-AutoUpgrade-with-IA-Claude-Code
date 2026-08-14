@@ -46,9 +46,18 @@ PDB_NAME=ORCLPDB
 SSH="ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no -o LogLevel=ERROR \
   -o ServerAliveInterval=30 -o ServerAliveCountMax=3 root@${VM_IP}"
 # AutoUpgrade 26.x requer Java 11 — o JDK do Oracle Home 19.3 é Java 8, NÃO usar.
-# Usar sempre o Java 11 instalado no SO (ver CLAUDE.md / feedback-java11-autoupgrade):
-JAVA11=/usr/lib/jvm/java-11-openjdk/bin/java
+# Usar sempre o Java 11 instalado no SO (não instalado por padrão — instalar se faltar):
+${SSH} "rpm -q java-11-openjdk || dnf install -y java-11-openjdk 2>&1 | tail -5"
 ```
+**Nota (2026-08-13):** `java-11-openjdk` não vem instalado por padrão (só o `java-17-openjdk`
+da Atividade 1, Fase 8). E o caminho `/usr/lib/jvm/java-11-openjdk/bin/java` **não existe**
+— o RPM instala em `/usr/lib/jvm/java-11-openjdk-<versão-completa>/bin/java` (ex.:
+`java-11-openjdk-11.0.25.0.9-2.0.1.el8.x86_64`). Resolver dinamicamente com um glob, nunca
+hardcodar a versão:
+```bash
+JAVA11_PATH=$(${SSH} "ls -d /usr/lib/jvm/java-11-openjdk-*/bin/java 2>/dev/null | head -1")
+```
+Usar `${JAVA11_PATH}` (não um caminho fixo) em todos os comandos `${JAVA11}` abaixo.
 
 ---
 
@@ -207,11 +216,17 @@ nohup dbca -silent -createDatabase \
   -redoLogFileSize 50 \
   -databaseType MULTIPURPOSE \
   -emConfiguration NONE \
-  -enableArchive false \
+  -enableArchive true \
   -ignorePreReqs > /tmp/dbca_cdborcl.out 2>&1 &
 echo \"DBCA_PID=\$!\"
 '"
 ```
+**Nota (2026-08-13):** era `-enableArchive false` — corrigido para `true`. O AutoUpgrade
+(Atividade 6) exige o banco em `ARCHIVELOG` com FRA configurada para tirar o guarantee
+restore point antes do upgrade para 23ai; sem isso o `-mode analyze` falha no precheck com
+`ERROR ... Enable the database in ARCHIVE LOG mode`. Descobrir isso só na Atividade 6 exige
+parar o banco e religar em modo `MOUNT` para rodar `ALTER DATABASE ARCHIVELOG` — mais
+simples já nascer em `ARCHIVELOG` aqui.
 
 Aguardar o processo `dbca` encerrar sozinho (poll a cada ~20-30s):
 ```bash
@@ -288,28 +303,14 @@ su - '"${ORACLE_USER}"' -c "export ORACLE_HOME='"${ORACLE_HOME_19C_PATCHED}"'; e
 
 ## FASE 5 — AutoUpgrade: conversão noncdbtopdb
 
-### 5.1 — Limpeza preventiva de jobs anteriores do AutoUpgrade (padrão, sempre executar)
+### 5.1 — Gerar autoupgrade_convert.cfg
 
-> **PADRÃO OBRIGATÓRIO** (ver CLAUDE.md § Regras Operacionais): antes de QUALQUER `-mode analyze`/`-mode deploy`, descobrir e limpar o job mais recente do mesmo SID — não esperar o erro "unfinished execution" aparecer para só então reagir. Jobs de atividades anteriores (mesmo com `.cfg` diferente) ficam indexados pelo mesmo SID e bloqueiam a nova execução.
-
-Descobrir o job mais recente para o SID e limpar (best-effort — "not found" é inofensivo):
-
-```bash
-${SSH} "
-LAST_JOB=\$(ls -td ${AUTOUPGRADE_LOG_DIR}/${ORACLE_SID}/${ORACLE_SID}/*/ 2>/dev/null | head -1 | xargs -n1 basename 2>/dev/null)
-echo \"Ultimo job encontrado para SID ${ORACLE_SID}: \${LAST_JOB:-nenhum}\"
-if [ -n \"\$LAST_JOB\" ]; then
-  su - ${ORACLE_USER} -c \"
-  export ORACLE_HOME=${ORACLE_HOME_19C_PATCHED}
-  export ORACLE_SID=${ORACLE_SID}
-  export PATH=\\\$ORACLE_HOME/bin:\\\$PATH
-  ${JAVA11} -jar ${AUTOUPGRADE_JAR} -config ${INSTALL_DIR}/autoupgrade_convert.cfg -clear_recovery_data -jobs \$LAST_JOB
-  \" 2>&1 | tail -5
-fi
-"
-```
-
-### 5.2 — Gerar autoupgrade_convert.cfg
+**Nota (2026-08-13):** esta etapa (gerar o `.cfg`) foi movida pra **antes** da limpeza
+preventiva de jobs (a seguir) — a ordem original tinha a limpeza referenciando
+`autoupgrade_convert.cfg -clear_recovery_data`, mas esse arquivo só era criado depois.
+Rodar a limpeza primeiro falha com `An error occurred while attempting to read
+/install/autoupgrade_convert.cfg` (confirmado nesta sessão), já que o comando
+`-clear_recovery_data` também precisa ler o `.cfg` (não é só metadado do SID).
 
 Exibir para o usuário verificar antes de criar:
 
@@ -351,6 +352,37 @@ chown ${ORACLE_USER}:${ORACLE_GROUP} ${INSTALL_DIR}/autoupgrade_convert.cfg
 cat ${INSTALL_DIR}/autoupgrade_convert.cfg
 "
 ```
+
+### 5.2 — Limpeza preventiva de jobs anteriores do AutoUpgrade (padrão, sempre executar)
+
+> **PADRÃO OBRIGATÓRIO** (ver CLAUDE.md § Regras Operacionais): antes de QUALQUER `-mode analyze`/`-mode deploy`, descobrir e limpar o job mais recente do mesmo SID — não esperar o erro "unfinished execution" aparecer para só então reagir. Jobs de atividades anteriores (mesmo com `.cfg` diferente) ficam indexados pelo mesmo SID e bloqueiam a nova execução.
+
+Descobrir o job mais recente para o SID e limpar (best-effort — "not found" é inofensivo).
+**Usar `ssh ... 'bash -s' <<'REMOTE_EOF'`, não `${SSH} "... su -c \"...\$VAR...\" ..."`** — o
+escaping aninhado de 4 níveis (local → argumento ssh → script remoto → `su -c` remoto)
+desse padrão corrompeu o `$PATH` com o PATH local do Windows/Git-Bash nesta sessão, mesmo
+bug já visto e documentado na skill `01-prepare-ambiente` (Fase 8.2):
+
+```bash
+ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no -o LogLevel=ERROR root@${VM_IP} 'bash -s' <<REMOTE_EOF
+LAST_JOB=\$(ls -td ${AUTOUPGRADE_LOG_DIR}/${ORACLE_SID}/${ORACLE_SID}/*/ 2>/dev/null | head -1 | xargs -n1 basename 2>/dev/null)
+echo "Ultimo job encontrado para SID ${ORACLE_SID}: \${LAST_JOB:-nenhum}"
+if [ -n "\$LAST_JOB" ]; then
+  su - ${ORACLE_USER} -c "
+  export ORACLE_HOME=${ORACLE_HOME_19C_PATCHED}
+  export ORACLE_SID=${ORACLE_SID}
+  export PATH=\\\$ORACLE_HOME/bin:\\\$PATH
+  ${JAVA11_PATH} -jar ${AUTOUPGRADE_JAR} -config ${INSTALL_DIR}/autoupgrade_convert.cfg -clear_recovery_data -jobs \$LAST_JOB
+  " 2>&1 | tail -5
+fi
+REMOTE_EOF
+```
+Note que aqui o delimitador do heredoc **não** está entre aspas (`<<REMOTE_EOF`, não
+`<<'REMOTE_EOF'`) de propósito — como o bloco ainda usa `${SSH_KEY}`/`${VM_IP}`/`${ORACLE_SID}`
+etc. (variáveis do agente, substituídas localmente), precisamos que o heredoc expanda essas
+enquanto preserva `\$LAST_JOB`/`\$ORACLE_HOME`/`\$PATH` literais (escapados com uma única
+barra) para serem avaliados só no bash remoto. Isso ainda é só 2 níveis de expansão (local
+uma vez, remoto uma vez), não 4 — daí a robustez.
 
 ### 5.3 — Executar analyze
 
@@ -398,9 +430,12 @@ echo \"PID=\$!\"
 
 ### 6.1 — Verificar CDB e PDB
 
+**Nota (2026-08-13):** `version_full` não existe em `v$database` (só em `v$instance`) —
+`SELECT ... version_full FROM v$database` falha com `ORA-00904`. Buscar de `v$instance`:
+
 ```bash
 ${SSH} 'cat > /tmp/check_conv.sql << '"'"'ENDSQL'"'"'
-SELECT name, cdb, open_mode, version_full FROM v$database;
+SELECT d.name, d.cdb, d.open_mode, i.version_full FROM v$database d, v$instance i;
 SELECT con_id, name, open_mode, restricted FROM v$pdbs ORDER BY con_id;
 EXIT;
 ENDSQL
@@ -432,6 +467,13 @@ lsnrctl status 2>&1 | grep -E \"Parameter File|Version|Services|Service|Instance
 ### 6.4 — Abrir ORCLPDB e persistir estado (padrão obrigatório, sempre em conjunto)
 
 > **PADRÃO OBRIGATÓRIO** (ver CLAUDE.md § Regras Operacionais): após a conversão, a PDB normalmente fica `MOUNTED`. Executar SEMPRE as duas ações juntas, no mesmo passo — nunca só o `OPEN` sem o `SAVE STATE`, senão a PDB volta a `MOUNTED` no próximo restart do banco (o `dbstart`/systemd não abre PDBs sozinho).
+
+**Nota (2026-08-13):** o AutoUpgrade `noncdbtopdb` já deixou a `ORCLPDB` `READ WRITE`
+sozinho nesta sessão (a conversão abre a PDB como parte do `POSTUPGRADE`) — o `ALTER
+PLUGGABLE DATABASE ORCLPDB OPEN` retornou `ORA-65019: pluggable database ORCLPDB already
+open`. Isso é inofensivo e esperado (rodar mesmo assim, é idempotente); o que importa de
+verdade neste passo é o `SAVE STATE`, que não é feito pela conversão e é o único jeito de a
+PDB sobreviver a um restart.
 
 ```bash
 ${SSH} 'cat > /tmp/openpdb.sql << '"'"'ENDSQL'"'"'
@@ -605,13 +647,37 @@ systemctl status oracle-database.service --no-pager | head -5
 
 > **PADRÃO OBRIGATÓRIO** (ver CLAUDE.md § Regras Operacionais): o listener e o banco foram iniciados manualmente ao longo desta atividade (Fases 3-6), fora do controle do systemd. Um `systemctl restart` num serviço "inactive" só executa o `ExecStart`, que falha com "already started" (TNS-01106 no listener) porque o processo real já está rodando por fora. Parar manualmente e subir via `systemctl start` para o systemd assumir.
 
+**Nota (2026-08-13):** o oposto também é um problema real, e foi o que aconteceu nesta
+sessão: os serviços (`RemainAfterExit=yes`) ainda estavam marcados `active` desde a
+Atividade 4, mesmo com o processo real derrubado manualmente aqui. `systemctl start` num
+serviço já `active` é **no-op silencioso** — o `ExecStart` (`dbstart`) nunca roda, e
+`systemctl is-active` mente dizendo `active` sem `pmon` nenhum de pé. Usar
+**`systemctl restart`** (não `start`) neste passo, sempre — força o `ExecStart` a rodar de
+verdade independente do estado anterior do serviço.
+
+Mesmo com `restart`, o `dbstart` chegou a tentar subir a `CDBORCL` duas vezes em segundos
+nesta sessão (causa não identificada — possível particularidade do `dbstart` do 19c) e
+deixou a SGA alocada sem `pmon` vivo (`ORA-01081: cannot start already-running ORACLE`
+seguido de `ORA-01034` em qualquer query). Se isso acontecer — `systemctl is-active` diz
+`active` mas `ps aux | grep pmon` não mostra nada e uma query dá `ORA-01034` — recuperar com
+`shutdown abort` seguido de `startup` manual (limpa a SGA órfã), depois repetir o
+`systemctl restart` para o systemd reconhecer o estado correto:
+```bash
+${SSH} 'cat > /tmp/abort_startup.sql << '"'"'ENDSQL'"'"'
+shutdown abort
+startup
+EXIT;
+ENDSQL
+su - '"${ORACLE_USER}"' -c "export ORACLE_HOME=${ORACLE_HOME_19C_PATCHED}; export ORACLE_SID=CDBORCL; export PATH=\$ORACLE_HOME/bin:\$PATH; sqlplus -s / as sysdba @/tmp/abort_startup.sql"'
+```
+
 ```bash
 ${SSH} "su - ${ORACLE_USER} -c '
 export ORACLE_HOME=${ORACLE_HOME_19C_PATCHED}
 export PATH=\$ORACLE_HOME/bin:\$PATH
 lsnrctl stop
 '"
-$SSH 'cat > /tmp/stop_cdb.sql << '"'"'ENDSQL'"'"'
+${SSH} 'cat > /tmp/stop_cdb.sql << '"'"'ENDSQL'"'"'
 shutdown immediate
 EXIT;
 ENDSQL
@@ -619,13 +685,16 @@ su - '"${ORACLE_USER}"' -c "export ORACLE_HOME=${ORACLE_HOME_19C_PATCHED}; expor
 
 ${SSH} "
 systemctl reset-failed oracle-listener.service oracle-database.service 2>/dev/null
-systemctl start oracle-listener.service
+systemctl restart oracle-listener.service
 sleep 3
-systemctl start oracle-database.service
-sleep 5
+systemctl restart oracle-database.service
+sleep 8
 systemctl is-active oracle-listener oracle-database
+ps aux | grep pmon | grep -v grep
 "
 ```
+Confirmar sempre com `ps aux | grep pmon`, não só `systemctl is-active` — o `is-active` de um
+serviço `RemainAfterExit=yes` não garante que o processo real está de pé.
 
 Reabrir e persistir a PDB após o restart via systemd (o `dbstart` não abre PDBs sozinho — repetir o passo 6.4):
 ```bash

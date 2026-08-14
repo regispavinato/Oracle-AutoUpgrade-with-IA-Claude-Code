@@ -14,17 +14,17 @@ VM_HOSTNAME=CHANGE_ME
 SSH_KEY=~/.ssh/oracle_imersao       # Gerado pelo skill oracle-imersao
 
 # --- VM VirtualBox (skill 00-criar-vm) ---
-VM_NETMASK=255.255.255.0
+VM_NETMASK=CHANGE_ME
 VM_GATEWAY=CHANGE_ME                 # Ex: 192.168.1.1
-VM_DNS1=8.8.8.8
-VM_DNS2=1.1.1.1
+VM_DNS1=CHANGE_ME
+VM_DNS2=CHANGE_ME
 VM_BRIDGE_ADAPTER=CHANGE_ME          # Nome exato do adaptador de rede do host (ver: VBoxManage list bridgedifs)
 VM_TIMEZONE=America/Sao_Paulo
 VM_RAM_MB=6144
 VM_CPUS=6
 VM_DISK1_GB=100
 VM_DISK2_GB=40
-VMS_BASE_DIR=D:\VMs
+VMS_BASE_DIR=CHANGE_ME              # Caminho local onde serão salvas as VMs criadas (ex: D:\VMs)
 ISO_PATH_OL8=CHANGE_ME               # Caminho completo do .iso do Oracle Linux 8.10 (ex: D:\ISOs\OracleLinux-R8-U10-x86_64-dvd.iso)
 
 # --- Credenciais do SO (nunca em código) ---

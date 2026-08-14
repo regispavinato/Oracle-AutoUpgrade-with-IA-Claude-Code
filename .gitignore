@@ -16,3 +16,6 @@ autoupgrade/
 # SO
 .DS_Store
 Thumbs.db
+
+# Estado de sessão do Claude Code (lock files, runtime-local)
+.claude/scheduled_tasks.lock

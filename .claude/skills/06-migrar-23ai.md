@@ -12,6 +12,21 @@ O AutoUpgrade realiza o upgrade completo do banco de 19c para 23ai em modo `depl
 - Gold Image 23ai extraída e instalada com root.sh executado
 - Banco CDBORCL rodando (19c, CDB com ORCLPDB)
 - autoupgrade.jar versão compatível com 23ai (23.x) em `${AUTOUPGRADE_JAR}`
+- **`${GOLD_IMAGE_23AI}` copiada para `/install` na VM** (não é feito automaticamente por
+  nenhuma skill anterior — verificar/copiar antes de começar, ex. via `scp`)
+- **Chave SSH configurada para o usuário `oracle`, não só `root`** (2026-08-13: esta é a
+  primeira skill do curso que conecta como `oracle@${VM_IP}` diretamente — todas as
+  anteriores usam `root@${VM_IP}` + `su - oracle -c '...'`). Se `ssh -i ${SSH_KEY}
+  oracle@${VM_IP}` falhar com `Permission denied (publickey...)`, copiar a
+  `authorized_keys` do root:
+  ```bash
+  ${SSH_ROOT} "
+  mkdir -p /home/${ORACLE_USER}/.ssh && chmod 700 /home/${ORACLE_USER}/.ssh
+  cp /root/.ssh/authorized_keys /home/${ORACLE_USER}/.ssh/authorized_keys
+  chown -R ${ORACLE_USER}:${ORACLE_GROUP} /home/${ORACLE_USER}/.ssh
+  chmod 600 /home/${ORACLE_USER}/.ssh/authorized_keys
+  "
+  ```
 
 ## Carregar variáveis
 
@@ -104,6 +119,43 @@ else
   echo 'AVISO: spfile nao encontrado em nenhum home — verificar localizacao'
   find /u01/app/oracle -name 'spfileCDBORCL.ora' 2>/dev/null
 fi
+"
+```
+
+### 0.3b — Confirmar ARCHIVELOG (obrigatório para o AutoUpgrade)
+
+**Nota (2026-08-13):** o AutoUpgrade exige o banco em `ARCHIVELOG` (com FRA configurada,
+ver 0.2) para tirar o guarantee restore point — sem isso `-mode analyze` falha no precheck
+com `ERROR ... Enable the database in ARCHIVE LOG mode`. A skill `05-converter-multitenant`
+já cria o CDB em `ARCHIVELOG`, mas confirmar aqui é barato e evita descobrir isso só depois
+do `analyze` falhar:
+
+```bash
+${SSH} "
+export ORACLE_HOME=\$(grep '^CDBORCL:' /etc/oratab | cut -d: -f2)
+export ORACLE_SID=CDBORCL
+export PATH=\$ORACLE_HOME/bin:\$PATH
+sqlplus -s / as sysdba << 'EOF'
+SELECT log_mode FROM v\$database;
+EOF
+"
+```
+Se retornar `NOARCHIVELOG`, habilitar (banco precisa ficar em `MOUNT`, breve indisponibilidade):
+```bash
+${SSH} "
+export ORACLE_HOME=\$(grep '^CDBORCL:' /etc/oratab | cut -d: -f2)
+export ORACLE_SID=CDBORCL
+export PATH=\$ORACLE_HOME/bin:\$PATH
+sqlplus -s / as sysdba << 'EOF'
+SHUTDOWN IMMEDIATE;
+STARTUP MOUNT;
+ALTER DATABASE ARCHIVELOG;
+ALTER DATABASE OPEN;
+ALTER PLUGGABLE DATABASE ORCLPDB OPEN;
+ALTER PLUGGABLE DATABASE ORCLPDB SAVE STATE;
+ALTER SYSTEM REGISTER;
+SELECT log_mode FROM v\$database;
+EOF
 "
 ```
 
@@ -223,17 +275,27 @@ ${SSH} "${ORACLE_HOME_23AI}/bin/sqlplus -v 2>/dev/null"
 
 ## FASE 2 — Preparar upgrade com AutoUpgrade
 
-### 2.1 — Atualizar autoupgrade.jar para versão 23ai-compatível
+### 2.1 — Confirmar autoupgrade.jar (NÃO sobrescrever com o do Oracle Home 23ai)
+
+**Nota (2026-08-13):** a versão anterior deste passo copiava
+`${ORACLE_HOME_23AI}/rdbms/admin/autoupgrade.jar` por cima do `${AUTOUPGRADE_JAR}` atual —
+isso é uma **regressão**, não uma atualização: o jar embutido no Gold Image 23ai é o que
+veio empacotado na release (`26.5.260117`, o próprio jar avisou "older than 180 days"),
+mais antigo que o jar já baixado via `wget` na Atividade 2 (`26.5.260807`). Confirmado nesta
+sessão: o jar do Oracle Home também tem `build.supported_target_versions` sem o `26`
+(`12.2,18,19,21,23` vs `12.2,18,19,21,23,26` do baixado). Não sobrescrever — só confirmar
+que o jar atual já é recente o bastante; se `-version` acusar mais de 180 dias, baixar de
+novo (mesmo comando da Atividade 2, Fase 2.2):
 
 ```bash
-${SSH} "
+${SSH} "java -jar ${AUTOUPGRADE_JAR} -version 2>/dev/null | head -3"
+```
+Se a versão for antiga ou o jar não existir:
+```bash
+${SSH_ROOT} "
+wget -O ${AUTOUPGRADE_JAR} https://download.oracle.com/otn-pub/otn_software/autoupgrade.jar 2>&1 | tail -5
+chown ${ORACLE_USER}:${ORACLE_GROUP} ${AUTOUPGRADE_JAR}
 java -jar ${AUTOUPGRADE_JAR} -version 2>/dev/null | head -3
-
-if [ -f ${ORACLE_HOME_23AI}/rdbms/admin/autoupgrade.jar ]; then
-  cp ${ORACLE_HOME_23AI}/rdbms/admin/autoupgrade.jar ${AUTOUPGRADE_JAR}
-  echo 'autoupgrade.jar atualizado do Oracle Home 23ai'
-  java -jar ${AUTOUPGRADE_JAR} -version
-fi
 "
 ```
 
@@ -252,7 +314,7 @@ echo \"SID: CDBORCL\"
 Exibir para o usuário verificar antes de criar:
 
 ```
-global.autoupg_log_dir=/u01/app/oracle/cfgtoollogs/autoupgrade_upgrade23ai
+global.global_log_dir=/u01/app/oracle/cfgtoollogs/autoupgrade_upgrade23ai
 
 upg1.source_home=<HOME_FONTE_DO_ORATAB>
 upg1.target_home=${ORACLE_HOME_23AI}
@@ -267,7 +329,7 @@ ${SSH} "
 ORACLE_HOME_SOURCE=\$(grep '^CDBORCL:' /etc/oratab | cut -d: -f2)
 
 cat > ${INSTALL_DIR}/autoupgrade_upgrade23ai.cfg << EOF
-global.autoupg_log_dir=/u01/app/oracle/cfgtoollogs/autoupgrade_upgrade23ai
+global.global_log_dir=/u01/app/oracle/cfgtoollogs/autoupgrade_upgrade23ai
 
 upg1.source_home=\${ORACLE_HOME_SOURCE}
 upg1.target_home=${ORACLE_HOME_23AI}
@@ -422,7 +484,11 @@ EOF
 "
 ```
 
-4. Rodar catupgrd com catctl.pl (NÃO usar catcon.pl nem rodar catupgrd.sql direto):
+4. Rodar catupgrd com catctl.pl (NÃO usar catcon.pl nem rodar catupgrd.sql direto).
+**Sempre `< /dev/null` no nohup** (2026-08-13: sem isso, o `catctl.pl`/seus `sqlplus`
+filhos podem travar esperando um stdin que nunca chega — foi confirmado nesta sessão que
+isso, e não paralelismo, era a causa de dois travamentos reais em fases diferentes; com
+`< /dev/null` o processo completo rodou sem travar nenhuma vez):
 
 ```bash
 ${SSH} "
@@ -434,7 +500,8 @@ mkdir -p /tmp/upg_manual_logs
 nohup \$ORACLE_HOME/perl/bin/perl \$ORACLE_HOME/rdbms/admin/catctl.pl \
   -n 2 \
   -l /tmp/upg_manual_logs \
-  \$ORACLE_HOME/rdbms/admin/catupgrd.sql > /tmp/upg_manual_logs/catctl_all.log 2>&1 &
+  \$ORACLE_HOME/rdbms/admin/catupgrd.sql < /dev/null > /tmp/upg_manual_logs/catctl_all.log 2>&1 &
+disown
 echo \"catctl.pl PID=\$!\"
 echo \"Log: /tmp/upg_manual_logs/catctl_all.log\"
 "
@@ -449,9 +516,31 @@ tail -3 /tmp/upg_manual_logs/catctl_all.log
 "
 ```
 
-6. Após conclusão (RC=0 no log), verificar resultado:
+**Nota crítica (2026-08-13) — NÃO confiar só no log parado para decidir que travou.** Fases
+`Files:1` (um arquivo só) que rodam algo pesado — ex. `dbms_utility.validate` visto nesta
+sessão — não imprimem nada até terminar, e legitimamente levaram até ~7 minutos numa VM
+pequena (6 vCPU/6GB compartilhados). Confundir isso com o deadlock real (item 4 acima)
+e matar o processo interrompe trabalho válido e obriga recomeçar o container inteiro. Antes
+de matar, confirmar que é deadlock de verdade checando `v$session`:
 ```bash
-${SSH} "grep 'Grand Total Upgrade Time\|RC=' /tmp/upg_manual_logs/catctl_all.log"
+${SSH} "
+export ORACLE_HOME=${ORACLE_HOME_23AI}
+export ORACLE_SID=CDBORCL
+export PATH=\$ORACLE_HOME/bin:\$PATH
+sqlplus -s / as sysdba << 'EOF'
+SELECT sid, status, last_call_et, sql_id FROM v\$session WHERE username='SYS' ORDER BY last_call_et DESC;
+EOF
+"
+```
+Rodar duas vezes com alguns minutos de intervalo: se alguma sessão está `ACTIVE` com
+`last_call_et` **crescendo** entre as duas checagens, está trabalhando de verdade — deixar
+rodar. Só considerar travado (deadlock real) se as sessões relevantes ficarem `INACTIVE`
+sem nenhum avanço no log por muito tempo (bem mais que os ~7 min de uma validação pesada).
+
+6. Após conclusão (procurar "Grand Total Upgrade Time" no log — não há uma linha `RC=`
+   separada nesta versão, o sucesso é a presença dessa linha final sem "ORA-" antes dela):
+```bash
+${SSH} "grep -E 'Grand Total Upgrade Time|ORA-' /tmp/upg_manual_logs/catctl_all.log"
 ```
 
 7. Abrir banco normalmente e continuar com FASE 5.
@@ -547,22 +636,71 @@ EOF
 
 ### 5.5 — Atualizar /etc/oratab e serviços systemd
 
+**Nota (2026-08-13):** o `sed 's|ORACLE_HOME=.*|...|g'` abaixo só substitui linhas que
+contêm literalmente o texto `ORACLE_HOME=` (a linha `Environment=ORACLE_HOME=...`) — ele
+**não** toca `ExecStart=`/`ExecStop=`/`Environment=PATH=`, que têm o caminho do Oracle Home
+**hardcoded diretamente**, sem o prefixo `ORACLE_HOME=`. Resultado real observado: o
+`Environment=ORACLE_HOME=` ficava correto (23ai) mas o `ExecStart=.../bin/dbstart ...`
+continuava chamando o `dbstart` do home 19c antigo — o serviço reportava `active` sem
+nenhum `pmon` de pé. Buscar pelo **caminho antigo completo** (que aparece em todas as
+linhas relevantes), não pelo nome da variável:
+
 ```bash
 ${SSH_ROOT} "
 # Atualizar oratab para apontar para 23ai
 sed -i 's|CDBORCL:.*:Y|CDBORCL:${ORACLE_HOME_23AI}:Y|' /etc/oratab
 grep CDBORCL /etc/oratab
 
-# Atualizar serviços systemd
+# Atualizar serviços systemd — substituir o CAMINHO ANTIGO completo, não so a var ORACLE_HOME=
 for svc in oracle-database.service oracle-listener.service; do
   [ -f /etc/systemd/system/\$svc ] && \
-    sed -i 's|ORACLE_HOME=.*|ORACLE_HOME=${ORACLE_HOME_23AI}|g; s|ORACLE_SID=.*|ORACLE_SID=CDBORCL|g' \
+    sed -i 's|${ORACLE_HOME_19C_PATCHED}|${ORACLE_HOME_23AI}|g; s|ORACLE_SID=.*|ORACLE_SID=CDBORCL|g' \
     /etc/systemd/system/\$svc
 done
 systemctl daemon-reload
+grep -E 'ORACLE_HOME|ExecStart|ExecStop' /etc/systemd/system/oracle-database.service
 echo 'systemd atualizado'
 "
 ```
+
+### 5.5b — Migrar o listener para o home 23ai (faltava nesta skill, mesmo gap da Atividade 4)
+
+**Nota (2026-08-13):** o `catctl.pl`/AutoUpgrade não migram o listener — ele continua
+apontando para `${ORACLE_HOME_19C_PATCHED}` mesmo depois do `oracle-listener.service` ter
+o `ORACLE_HOME` atualizado na 5.5 (o service só muda o que o systemd usa no próximo start;
+o listener já rodando continua no home antigo até ser reiniciado explicitamente no home
+novo). Sem este passo, `lsnrctl status` mostra `Parameter File` no home 19c e a versão do
+TNSLSNR fica desatualizada:
+
+```bash
+${SSH} "
+export ORACLE_HOME=<home_atual_do_listener_ex_19c_patched>
+export PATH=\$ORACLE_HOME/bin:\$PATH
+lsnrctl stop
+
+mkdir -p ${ORACLE_HOME_23AI}/network/admin
+cp <home_atual>/network/admin/listener.ora ${ORACLE_HOME_23AI}/network/admin/listener.ora
+cp <home_atual>/network/admin/tnsnames.ora ${ORACLE_HOME_23AI}/network/admin/tnsnames.ora 2>/dev/null || true
+
+export ORACLE_HOME=${ORACLE_HOME_23AI}
+export PATH=\$ORACLE_HOME/bin:\$PATH
+lsnrctl start
+"
+```
+Registrar os serviços no listener novo:
+```bash
+${SSH} "
+export ORACLE_HOME=${ORACLE_HOME_23AI}
+export ORACLE_SID=CDBORCL
+export PATH=\$ORACLE_HOME/bin:\$PATH
+sqlplus -s / as sysdba << 'EOF'
+ALTER SYSTEM REGISTER;
+EOF
+lsnrctl status 2>&1 | grep -E 'Parameter File|Version|Service'
+"
+```
+Verificar: `Parameter File` aponta pro `${ORACLE_HOME_23AI}`, `Version TNSLSNR` mostra
+`23.26.1.0.0`, serviços `CDBORCL`/`CDBORCLXDB`/`orclpdb` presentes.
 
 ### 5.6 — Atualizar .bash_profile do oracle
 
@@ -572,6 +710,69 @@ sed -i 's|export ORACLE_HOME=.*|export ORACLE_HOME=${ORACLE_HOME_23AI}|' ~/.bash
 sed -i 's|export ORACLE_SID=.*|export ORACLE_SID=CDBORCL|' ~/.bash_profile
 grep -E 'ORACLE_HOME|ORACLE_SID|PATH' ~/.bash_profile
 "
+```
+
+### 5.7 — Remover parâmetros depreciados do spfile (evita duplo-start do dbstart)
+
+**Nota (2026-08-13):** o spfile copiado do 19c pra cá (Fase 0.3) carrega parâmetros que o
+23ai considera depreciados (`audit_file_dest`, `audit_trail` — podem variar). Todo boot
+gera `ORA-32004: obsolete or deprecated parameter(s)` como aviso — inofensivo por si só,
+mas foi observado que isso faz o `dbstart` do systemd **iniciar a instância duas vezes**
+em sequência (a segunda tentativa falha com `ORA-01081: cannot start already-running
+ORACLE`, deixando uma SGA órfã sem `pmon` vivo mesmo com `systemctl is-active` dizendo
+`active`). Resetar os parâmetros do spfile resolve — confirmado nesta sessão que o
+`systemctl restart` ficou limpo (um único `ORACLE instance started`) depois disso:
+
+```bash
+${SSH} "
+export ORACLE_HOME=${ORACLE_HOME_23AI}
+export ORACLE_SID=CDBORCL
+export PATH=\$ORACLE_HOME/bin:\$PATH
+sqlplus -s / as sysdba << 'EOF'
+-- Ver quais parametros estao marcados como depreciados (olhar o alert log tambem):
+-- grep -A5 'Deprecated system parameters' \$ORACLE_BASE/diag/rdbms/cdborcl/CDBORCL/trace/alert_CDBORCL.log
+ALTER SYSTEM RESET audit_file_dest SCOPE=SPFILE SID='*';
+ALTER SYSTEM RESET audit_trail SCOPE=SPFILE SID='*';
+EOF
+"
+```
+Efeito só aparece no próximo restart — se ainda não reiniciou depois da 5.5b, o restart da
+5.8 abaixo já pega o spfile limpo.
+
+### 5.8 — Handoff para systemd (padrão obrigatório)
+
+> Mesma regra das atividades 1/4/5 (ver `CLAUDE.md` § Regras Operacionais): usar sempre
+> `systemctl restart`, nunca `start` — e confirmar com `ps aux | grep pmon`, não só
+> `systemctl is-active`, que não garante processo real de pé.
+
+```bash
+${SSH} "su - ${ORACLE_USER} -c '
+export ORACLE_HOME=${ORACLE_HOME_23AI}
+export ORACLE_SID=CDBORCL
+export PATH=\$ORACLE_HOME/bin:\$PATH
+sqlplus -s / as sysdba << '"'"'EOF'"'"'
+SHUTDOWN IMMEDIATE;
+EOF
+'"
+${SSH_ROOT} "
+systemctl reset-failed oracle-listener.service oracle-database.service 2>/dev/null
+systemctl restart oracle-listener.service
+sleep 3
+systemctl restart oracle-database.service
+sleep 10
+systemctl is-active oracle-listener oracle-database
+ps aux | grep pmon | grep -v grep
+"
+```
+Reabrir e persistir a PDB depois do restart (o `dbstart` não abre PDBs sozinho):
+```bash
+${SSH} 'cat > /tmp/openpdb_final.sql << '"'"'ENDSQL'"'"'
+ALTER PLUGGABLE DATABASE ORCLPDB OPEN;
+ALTER PLUGGABLE DATABASE ORCLPDB SAVE STATE;
+ALTER SYSTEM REGISTER;
+SELECT name, open_mode FROM v\$pdbs;
+ENDSQL
+su - '"${ORACLE_USER}"' -c "export ORACLE_HOME=${ORACLE_HOME_23AI}; export ORACLE_SID=CDBORCL; export PATH=\$ORACLE_HOME/bin:\$PATH; sqlplus -s / as sysdba @/tmp/openpdb_final.sql"'
 ```
 
 ---
