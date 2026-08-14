@@ -1,6 +1,5 @@
 {
   "permissions": {
-	"defaultMode": "bypassPermissions",
     "allow": [
       "Read(//c/Users/chris/.ssh//**)",
       "Read(//c/Users/chris/.ssh/**)",
@@ -13,7 +12,19 @@
       "Bash(python3 -c \"import paramiko; print\\('paramiko ok'\\)\")",
       "Bash(python3 *)",
       "Skill(loop)",
-      "Bash(grep -n 'cid\\\\|comp_id\\\\|CATPROC\\\\|cdb_registry\\\\|v\\\\$pdbs' D:/Imersao_Autoupgrade/.claude/skills/08-verificacao-final.md)"
-    ]
+      "Bash(grep -n 'cid\\\\|comp_id\\\\|CATPROC\\\\|cdb_registry\\\\|v\\\\$pdbs' D:/Imersao_Autoupgrade/.claude/skills/08-verificacao-final.md)",
+      "Bash('/c/Program Files/Oracle/VirtualBox/VBoxManage.exe' showvminfo srv02.localdomain --machinereadable)",
+      "Bash(timeout 5 bash -c \"cat < /dev/tcp/192.168.1.222/22\")",
+      "Bash(echo \"exit=$?\")",
+      "Bash(ssh -i ~/.ssh/oracle_imersao -o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout=10 root@192.168.1.222 \"hostname -f; cat /etc/os-release | grep -E '^\\(NAME|VERSION\\)='\")",
+      "Bash(ssh -i ~/.ssh/oracle_imersao -o StrictHostKeyChecking=no -o LogLevel=ERROR root@192.168.1.222 \"shutdown -h now\")",
+      "Bash('/c/Program Files/Oracle/VirtualBox/VBoxManage.exe' storageattach srv02.localdomain --storagectl 'IDE Controller' --port 0 --device 0 --type dvddrive --medium none)",
+      "Bash(echo \"exit eject: $?\")",
+      "Bash('/c/Program Files/Oracle/VirtualBox/VBoxManage.exe' startvm srv02.localdomain --type headless)",
+      "Bash(echo \"exit start: $?\")",
+      "Bash(ssh -i ~/.ssh/oracle_imersao -o StrictHostKeyChecking=no -o LogLevel=ERROR root@192.168.1.222 \"dnf update -y\")",
+      "Bash(ssh -i ~/.ssh/oracle_imersao -o StrictHostKeyChecking=no -o LogLevel=ERROR root@192.168.1.222 \"reboot\")"
+    ],
+    "defaultMode": "bypassPermissions"
   }
 }

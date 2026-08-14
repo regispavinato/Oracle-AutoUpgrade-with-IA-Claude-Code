@@ -168,7 +168,11 @@ selinux --disabled
 firewall --disabled
 ignoredisk --only-use=sda
 clearpart --all --initlabel --drives=sda
-autopart --type=lvm
+part /boot --fstype=xfs --size=1024
+part pv.sda1 --size=1 --grow
+volgroup vg_sys pv.sda1
+logvol swap --vgname=vg_sys --name=lv_swap --size=${VM_RAM_MB}
+logvol / --vgname=vg_sys --name=lv_root --size=1 --grow --fstype=xfs
 bootloader --location=mbr --boot-drive=sda
 skipx
 reboot
@@ -197,10 +201,24 @@ chmod 600 /root/.ssh/authorized_keys
 Sem isso, a cópia da chave fica pendente para a seção 3.2 (manual, via MobaXterm) da skill
 `oracle-imersao`.
 
-`autopart --type=lvm` sobre `sda` cria `/boot`, swap e `/` (LVM) usando todo o disco de
-${VM_DISK1_GB}GB — `/u01` (Fase 3 da `01-prepare-ambiente`) é só um diretório dentro de
-`/`, não um mount separado. `ignoredisk --only-use=sda` + `clearpart --drives=sda` garantem
-que `sdb` (o disco de ${VM_DISK2_GB}GB) nunca é tocado pelo instalador.
+**Nota (2026-08-14):** o particionamento é manual (`part`/`logvol`), não `autopart
+--type=lvm`, de propósito — o `autopart` padrão do Anaconda cria um LV **`/home` separado**
+sempre que o disco é grande o bastante (é o caso aqui, 100GB), reservando ~30GB que essa VM
+nunca usa (é um servidor Oracle, não tem usuários locais de verdade). Com `part`/`logvol`
+explícitos, só existem `/boot` (1GB, fora do LVM), swap (= `${VM_RAM_MB}` MB) e `/` (resto
+do disco) — `/home` continua existindo, só que como diretório comum dentro de `/`, não como
+mount/LV separado. Da mesma forma, `/u01` (Fase 3 da `01-prepare-ambiente`) também é só um
+diretório dentro de `/`, não um mount separado. `ignoredisk --only-use=sda` +
+`clearpart --drives=sda` garantem que `sdb` (o disco de ${VM_DISK2_GB}GB) nunca é tocado
+pelo instalador.
+
+**Ainda não testado ponta-a-ponta** (2026-08-14): a VM usada para validar esta skill até
+aqui (`srv01.localdomain`) foi criada com o `autopart --type=lvm` antigo; a segunda VM de
+teste (`srv02.localdomain`) foi apagada antes de chegar a rodar um kickstart com este
+`part`/`logvol` novo. Sintaxe conferida contra a documentação do pykickstart, mas a
+primeira execução real deste bloco deve ser acompanhada com atenção — em especial se
+`logvol swap --size=${VM_RAM_MB}` aceita a variável numérica sem problema, e se o
+`bootloader --boot-drive=sda` ainda funciona sem o `/boot` vindo do `autopart`.
 
 `@^minimal-environment` é o grupo de pacotes "Minimal Install" do Anaconda — sem
 GNOME/X11/nenhum pacote gráfico, mesmo padrão de um servidor.
@@ -352,6 +370,19 @@ Gold Image 19c (`${GOLD_IMAGE_19C}`) para `${INSTALL_DIR}` dentro da VM.
 
 ## Notas / Troubleshooting
 
+- **`sda`/`sdb` podem trocar de ordem entre boots** (confirmado 2026-08-14, segunda VM
+  criada com esta skill): mesmo com o disco 1 (SO, 100GB) corretamente na porta 0 do SATA
+  Controller e o disco 2 (dados, ${VM_DISK2_GB}GB) na porta 1 — confirmado via
+  `VBoxManage showvminfo --machinereadable`, configuração do hypervisor correta — o kernel
+  Linux pode nomear os discos na ordem inversa num boot específico (não-determinístico,
+  ligado à ordem em que o AHCI virtualizado responde ao probe, mais sensível logo após
+  mudar algo no barramento como ejetar o ISO do IDE). O disco em si não muda, só o nome
+  que o kernel dá a ele naquele boot. Um reboot subsequente pode voltar ao normal sozinho
+  (foi o que aconteceu), mas **nunca assumir a letra fixa** — sempre conferir dinamicamente
+  qual disco está livre antes de qualquer operação destrutiva (a skill `01-prepare-ambiente`
+  já faz essa checagem por uso, não por nome, na Fase 2.1 — é a proteção real contra isso).
+  Se `DISK_DEVICE` no `.env` não bater com o que a checagem dinâmica mostrar, atualizar o
+  `.env` antes de prosseguir, nunca seguir com o valor desatualizado.
 - **`--platform-architecture=x86` é obrigatório** em `createvm` a partir do VirtualBox 7.x
   — sem essa flag o comando falha com parâmetro faltando.
 - **Sintaxe de rede no `modifyvm` mudou** nas versões recentes do VirtualBox: é
