@@ -212,13 +212,11 @@ diretório dentro de `/`, não um mount separado. `ignoredisk --only-use=sda` +
 `clearpart --drives=sda` garantem que `sdb` (o disco de ${VM_DISK2_GB}GB) nunca é tocado
 pelo instalador.
 
-**Ainda não testado ponta-a-ponta** (2026-08-14): a VM usada para validar esta skill até
-aqui (`srv01.localdomain`) foi criada com o `autopart --type=lvm` antigo; a segunda VM de
-teste (`srv02.localdomain`) foi apagada antes de chegar a rodar um kickstart com este
-`part`/`logvol` novo. Sintaxe conferida contra a documentação do pykickstart, mas a
-primeira execução real deste bloco deve ser acompanhada com atenção — em especial se
-`logvol swap --size=${VM_RAM_MB}` aceita a variável numérica sem problema, e se o
-`bootloader --boot-drive=sda` ainda funciona sem o `/boot` vindo do `autopart`.
+**Validado ponta-a-ponta em 2026-08-14** (VM `DB19c`): `lsblk -f` pós-instalação confirmou
+exatamente o esperado — `sda1` (`/boot`, xfs, fora do LVM), `vg_sys-lv_root` (`/`, xfs) e
+`vg_sys-lv_swap` (swap), **nenhum LV de `/home`**. `logvol swap --size=${VM_RAM_MB}` aceitou
+a variável numérica sem problema, e `bootloader --boot-drive=sda` funcionou normalmente sem
+o `/boot` vindo do `autopart`.
 
 `@^minimal-environment` é o grupo de pacotes "Minimal Install" do Anaconda — sem
 GNOME/X11/nenhum pacote gráfico, mesmo padrão de um servidor.
@@ -230,12 +228,24 @@ GNOME/X11/nenhum pacote gráfico, mesmo padrão de um servidor.
 Montar os argumentos como array e usar splatting — continuação de linha com backtick
 `` ` `` já causou "Empty user password is not allowed" por embaralhar argumentos silenciosamente:
 
+**Nota (2026-08-14):** a flag `--hostname` do `unattended install` **exige um FQDN**
+(nome + domínio, com ponto) — se `VM_HOSTNAME` for um nome simples sem ponto (ex.: `DB19c`,
+que foi pedido explicitamente sem sufixo de domínio), o comando falha com "Incomplete
+hostname 'X' — must include both a name and a domain". Essa flag só alimenta templates
+internos do próprio VBoxManage (que não usamos, já que `--script-template` sobrescreve
+tudo) — é seguro passar um FQDN sintético só nela, mantendo o hostname real do sistema
+exatamente como pedido (`VM_HOSTNAME` puro) na linha `network --hostname=` dentro do
+`ks.cfg`, que é o que realmente importa:
+```powershell
+$hostnameForFlag = if ($VM_HOSTNAME -match '\.') { $VM_HOSTNAME } else { "$VM_HOSTNAME.localdomain" }
+```
+
 ```powershell
 $argsList = @(
   "unattended", "install", "${VM_HOSTNAME}",
   "--iso=${ISO_PATH_OL8}",
   "--script-template=${VMS_BASE_DIR}\${VM_HOSTNAME}\ks.cfg",
-  "--hostname=${VM_HOSTNAME}",
+  "--hostname=$hostnameForFlag",
   "--user=root",
   "--user-password=placeholder-unused",
   "--no-install-additions",
